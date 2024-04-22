@@ -86,3 +86,98 @@ func NewSet() *Set {
 		shardsMap: make(map[uint64]struct{}),
 	}
 }
+
+type FieldView struct {
+	// field -> view -> *shardSet
+	m map[uint64]map[string]*Set
+}
+
+func (vs *FieldView) Get(field uint64) map[string]*Set {
+	return vs.m[field]
+}
+
+func (vs *FieldView) AddSet(field uint64, view string, ss *Set) {
+
+	f, ok := vs.m[field]
+	if !ok {
+		f = make(map[string]*Set)
+		vs.m[field] = f
+	}
+	// INVAR: f is ready to take ss.
+
+	// existing stuff to merge with?
+	prior, ok := f[view]
+	if !ok {
+		f[view] = ss
+		return
+	}
+	// merge ss and prior. No need to put the union back into f[fv.View]
+	// because prior is a pointer.
+	prior.UnionInPlace(ss)
+}
+
+func (a *FieldView) Equals(b *FieldView) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if len(a.m) != len(b.m) {
+		return false
+	}
+	for field, viewmapA := range a.m {
+		viewmapB, ok := b.m[field]
+		if !ok {
+			return false
+		}
+		if len(viewmapB) != len(viewmapA) {
+			return false
+		}
+		for k, va := range viewmapA {
+			vb, ok := viewmapB[k]
+			if !ok {
+				return false
+			}
+			if !va.Equals(vb) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func NewFieldView() *FieldView {
+	return &FieldView{
+		m: make(map[uint64]map[string]*Set), // expected response from GetView2ShardMapForIndex
+	}
+}
+
+func (vs *FieldView) AddShard(field uint64, view string, shard uint64) {
+	viewmap, ok := vs.m[field]
+	if !ok {
+		viewmap = make(map[string]*Set)
+		vs.m[field] = viewmap
+	}
+	ss, ok := viewmap[view]
+	if !ok {
+		ss = NewSet()
+		viewmap[view] = ss
+	}
+	ss.Add(shard)
+}
+
+func (vs *FieldView) String() (r string) {
+	r = "\n"
+	for field, viewmap := range vs.m {
+		for view, shards := range viewmap {
+			r += fmt.Sprintf("field '%v' view:'%v' shards:%v\n", field, view, shards)
+		}
+	}
+	r += "\n"
+	return
+}
+
+func (vs *FieldView) Remove(field uint64) {
+	delete(vs.m, field)
+}
